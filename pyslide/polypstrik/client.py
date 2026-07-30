@@ -45,6 +45,37 @@ class PolypStrikClient:
             path = "/" + path
         return f"{self.base_url}{path}"
 
+    @staticmethod
+    def _response_body(response):
+        """ Parse JSON body if possible; return ``(body, detail)``."""
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        return body, body.get("detail")
+
+    def _raise_for_error(self, response, action):
+        """ Raise AuthError on 401, otherwise APIError with a clear message."""
+        body, detail = self._response_body(response)
+
+        if response.status_code == 401:
+            raise PolypStrikAuthError(
+                detail or response.text or "Authentication failed.",
+                status_code=401,
+                detail=detail,
+            )
+
+        message = detail or response.text or (
+            f"{action} failed ({response.status_code})"
+        )
+        raise PolypStrikAPIError(
+            message,
+            status_code=response.status_code,
+            detail=detail,
+        )
+
     def login(self, username, password, otp=None):
         """ Exchange username and password (& optional TOTP) for an API token.
 
@@ -85,11 +116,7 @@ class PolypStrikClient:
         if response.status_code == 200:
             return response.json()
 
-        try:
-            body = response.json()
-        except ValueError:
-            body = {}
-        detail = body.get("detail")
+        body, detail = self._response_body(response)
 
         if response.status_code == 400 and detail == "otp_required":
             raise PolypStrikOtpRequired(
@@ -173,27 +200,7 @@ class PolypStrikClient:
         if response.status_code == 201:
             return response.json()
 
-        try:
-            body = response.json()
-        except ValueError:
-            body = {}
-        detail = body.get("detail")
-
-        if response.status_code == 401:
-            raise PolypStrikAuthError(
-                detail or response.text or "Authentication failed.",
-                status_code=401,
-                detail=detail,
-            )
-
-        message = detail or response.text or (
-            f"Create project failed ({response.status_code})"
-        )
-        raise PolypStrikAPIError(
-            message,
-            status_code=response.status_code,
-            detail=detail,
-        )
+        self._raise_for_error(response, "Create project")
 
     def get_status(self, project_id, token):
         """ Poll analysis status for a project.
@@ -224,27 +231,7 @@ class PolypStrikClient:
         if response.status_code == 200:
             return response.json()
 
-        try:
-            body = response.json()
-        except ValueError:
-            body = {}
-        detail = body.get("detail")
-
-        if response.status_code == 401:
-            raise PolypStrikAuthError(
-                detail or response.text or "Authentication failed.",
-                status_code=401,
-                detail=detail,
-            )
-
-        message = detail or response.text or (
-            f"Get status failed ({response.status_code})"
-        )
-        raise PolypStrikAPIError(
-            message,
-            status_code=response.status_code,
-            detail=detail,
-        )
+        self._raise_for_error(response, "Get status")
 
     def get_project(self, project_id, token):
         """ Fetch project detail with sample outputs and download URLs.
@@ -275,27 +262,7 @@ class PolypStrikClient:
         if response.status_code == 200:
             return response.json()
 
-        try:
-            body = response.json()
-        except ValueError:
-            body = {}
-        detail = body.get("detail")
-
-        if response.status_code == 401:
-            raise PolypStrikAuthError(
-                detail or response.text or "Authentication failed.",
-                status_code=401,
-                detail=detail,
-            )
-
-        message = detail or response.text or (
-            f"Get project failed ({response.status_code})"
-        )
-        raise PolypStrikAPIError(
-            message,
-            status_code=response.status_code,
-            detail=detail,
-        )
+        self._raise_for_error(response, "Get project")
 
     def download_sample_file(
         self, sample_id, file_field, token, dest_path, *, timeout=None
@@ -339,27 +306,7 @@ class PolypStrikClient:
             stream=True,
         ) as response:
             if response.status_code != 200:
-                try:
-                    body = response.json()
-                except ValueError:
-                    body = {}
-                detail = body.get("detail")
-
-                if response.status_code == 401:
-                    raise PolypStrikAuthError(
-                        detail or response.text or "Authentication failed.",
-                        status_code=401,
-                        detail=detail,
-                    )
-
-                message = detail or response.text or (
-                    f"Download failed ({response.status_code})"
-                )
-                raise PolypStrikAPIError(
-                    message,
-                    status_code=response.status_code,
-                    detail=detail,
-                )
+                self._raise_for_error(response, "Download")
 
             # Write to a partial file first to avoid a truncated file that looks complete
             part_path = dest_path + ".part"
