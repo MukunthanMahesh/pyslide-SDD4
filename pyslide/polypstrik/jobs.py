@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" Local registry mapping slide identity → PolypStrik project_id."""
+""" Local registry mapping slide identity to PolypStrik project_id."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def image_key(path):
 
 
 def load_jobs():
-    """ Return the jobs registry dict (``image_key`` → ``project_id``)."""
+    """ Return the jobs registry dict (``image_key`` to ``project_id``)."""
     path = _path()
     if not path.is_file():
         return {}
