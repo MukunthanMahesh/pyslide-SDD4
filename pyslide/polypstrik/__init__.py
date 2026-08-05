@@ -8,11 +8,13 @@ from .client import (
     PolypStrikClient,
     PolypStrikOtpRequired,
 )
+from .vsi import PolypStrikVsiError
 
 __all__ = [
     "PolypStrikAPIError",
     "PolypStrikAuthError",
     "PolypStrikClient",
     "PolypStrikOtpRequired",
+    "PolypStrikVsiError",
     "annotate_with_polypstrik",
 ]

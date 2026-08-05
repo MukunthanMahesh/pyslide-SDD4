@@ -39,7 +39,9 @@ def _build_parser():
     subparsers = parser.add_subparsers(dest="command")
 
     annotate_parser = subparsers.add_parser(
-        "annotate", help="Upload (once) and/or check annotation status"
+        "annotate",
+        help="Upload (once) and/or check annotation status "
+        "(.vsi auto-zips with companion folder)",
     )
     annotate_parser.add_argument("slide", help="Path to slide image")
     annotate_parser.add_argument(

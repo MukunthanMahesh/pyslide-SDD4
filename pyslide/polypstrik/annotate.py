@@ -10,6 +10,7 @@ from pathlib import Path
 from .auth import clear_token, ensure_credentials
 from .client import PolypStrikAPIError, PolypStrikAuthError, PolypStrikClient
 from .jobs import get_project_id, image_key, set_project_id
+from .vsi import prepare_upload_path
 
 
 __all__ = ["annotate_with_polypstrik"]
@@ -115,7 +116,8 @@ def annotate_with_polypstrik(
     Parameters
     ----------
     image_path : str or path-like
-        Local slide / archive to annotate.
+        Local slide / archive to annotate. Olympus ``.vsi`` files are
+        auto-zipped with their companion ``{stem}_/`` folder before upload.
     base_url : str, optional
         PolypStrik base URL (else ``POLYPSTRIK_BASE_URL``).
     wait : bool
@@ -146,6 +148,8 @@ def annotate_with_polypstrik(
     ------
     FileNotFoundError
         ``image_path`` does not exist.
+    PolypStrikVsiError
+        ``.vsi`` companion folder is missing or empty (on upload).
     """
     path = Path(image_path)
     if not path.is_file():
@@ -158,69 +162,84 @@ def annotate_with_polypstrik(
     client = PolypStrikClient(**client_kwargs)
 
     token = ensure_credentials(client, verify=verify)
+    # Job identity stays on the original slide path (not a temp zip).
     key = image_key(path)
     project_id = get_project_id(key)
     uploaded = False
+    cleanup_paths = []
 
-    if project_id is None:
-        if not upload:
-            return {
-                "project_id": None,
-                "status": None,
-                "uploaded": False,
-                "paths": [],
-                "results_dir": None,
-                "status_payload": None,
-                "message": "No saved job for this slide; run annotate first.",
-            }
+    try:
+        if project_id is None:
+            if not upload:
+                return {
+                    "project_id": None,
+                    "status": None,
+                    "uploaded": False,
+                    "paths": [],
+                    "results_dir": None,
+                    "status_payload": None,
+                    "message": "No saved job for this slide; run annotate first.",
+                }
 
-        def _create(tok):
-            return client.create_project(path, tok, timeout=timeout)
+            upload_path, cleanup_paths = prepare_upload_path(path)
 
-        created, token = _call_with_reauth(client, token, _create)
-        project_id = created["id"]
-        set_project_id(key, project_id)
-        uploaded = True
+            def _create(tok):
+                return client.create_project(upload_path, tok, timeout=timeout)
 
-    def _status(tok):
-        return client.get_status(project_id, tok)
+            created, token = _call_with_reauth(client, token, _create)
+            project_id = created["id"]
+            set_project_id(key, project_id)
+            uploaded = True
 
-    status_payload, token = _call_with_reauth(client, token, _status)
-    status = status_payload.get("status") if isinstance(status_payload, dict) else None
+        def _status(tok):
+            return client.get_status(project_id, tok)
 
-    if wait and status not in _TERMINAL:
-        interval = max(float(poll_interval), 0.1)
-        while True:
-            time.sleep(interval)
-            status_payload, token = _call_with_reauth(client, token, _status)
-            status = (
-                status_payload.get("status")
-                if isinstance(status_payload, dict)
-                else None
-            )
-            if status in _TERMINAL:
-                break
-
-    paths = []
-    out_dir = None
-    if status == "completed":
-        out_dir = _default_results_dir(project_id, results_dir)
-
-        def _project(tok):
-            return client.get_project(project_id, tok)
-
-        project, token = _call_with_reauth(client, token, _project)
-        paths = _download_outputs(
-            client, project, token, out_dir, timeout=timeout
+        status_payload, token = _call_with_reauth(client, token, _status)
+        status = (
+            status_payload.get("status")
+            if isinstance(status_payload, dict)
+            else None
         )
-    elif results_dir is not None:
-        out_dir = _default_results_dir(project_id, results_dir)
 
-    return {
-        "project_id": project_id,
-        "status": status,
-        "uploaded": uploaded,
-        "paths": paths,
-        "results_dir": str(out_dir) if out_dir is not None else None,
-        "status_payload": status_payload,
-    }
+        if wait and status not in _TERMINAL:
+            interval = max(float(poll_interval), 0.1)
+            while True:
+                time.sleep(interval)
+                status_payload, token = _call_with_reauth(client, token, _status)
+                status = (
+                    status_payload.get("status")
+                    if isinstance(status_payload, dict)
+                    else None
+                )
+                if status in _TERMINAL:
+                    break
+
+        paths = []
+        out_dir = None
+        if status == "completed":
+            out_dir = _default_results_dir(project_id, results_dir)
+
+            def _project(tok):
+                return client.get_project(project_id, tok)
+
+            project, token = _call_with_reauth(client, token, _project)
+            paths = _download_outputs(
+                client, project, token, out_dir, timeout=timeout
+            )
+        elif results_dir is not None:
+            out_dir = _default_results_dir(project_id, results_dir)
+
+        return {
+            "project_id": project_id,
+            "status": status,
+            "uploaded": uploaded,
+            "paths": paths,
+            "results_dir": str(out_dir) if out_dir is not None else None,
+            "status_payload": status_payload,
+        }
+    finally:
+        for tmp in cleanup_paths:
+            try:
+                Path(tmp).unlink()
+            except OSError:
+                pass
