@@ -25,6 +25,23 @@ pip install pyslide==0.5.0
 Usage
 ------------
 
+Optional PolypStrik remote annotation (requires `pip install -e ".[polypstrik]"`):
+
+```bash
+export POLYPSTRIK_BASE_URL=https://localhost
+python -m pyslide.polypstrik --no-verify annotate path/to/slide.tif
+python -m pyslide.polypstrik --no-verify status path/to/slide.tif
+```
+
+```python
+from pyslide.polypstrik import annotate_with_polypstrik
+
+result = annotate_with_polypstrik("path/to/slide.tif", verify=False)
+print(result["status"], result["paths"])
+```
+
+Olympus `.vsi` slides are auto-zipped with their companion `{stem}_/` folder before upload. See the PolypStrik docs page for details.
+
 Documentation
 ------------
 Hosted in [https://pyslide.readthedocs.io](https://pyslide.readthedocs.io), powered by [readthedocs](https://readthedocs.org) and [Sphinx](http://www.sphinx-doc.org).
