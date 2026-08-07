@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" Mocked unit tests for the optional PolypStrik client."""
+""" Unit tests for the optional PolypStrik client (mocked HTTP)."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ sys.path.insert(0, PRJ_PATH)
 
 @pytest.fixture
 def polypstrik_home(tmp_path, monkeypatch):
-    """ Isolate credentials / jobs JSON under a temp directory."""
+    """ Keep credentials and jobs JSON under a temp directory."""
     cred = tmp_path / "credentials.json"
     jobs = tmp_path / "jobs.json"
     monkeypatch.setenv("POLYPSTRIK_CREDENTIALS", str(cred))
@@ -35,7 +35,7 @@ def polypstrik_home(tmp_path, monkeypatch):
 
 @pytest.fixture
 def tiny_slide(tmp_path):
-    """ Tiny dummy file used as a multipart upload stand-in."""
+    """ Small dummy file used as a multipart upload stand-in."""
     path = tmp_path / "slide.tif"
     path.write_bytes(b"tiny-slide-bytes")
     return path
@@ -105,7 +105,9 @@ def test_annotate_first_upload_saves_job(polypstrik_home, tiny_slide):
     }
 
     with patch.object(ann, "PolypStrikClient", return_value=client):
-        result = ann.annotate_with_polypstrik(tiny_slide, verify=False)
+        result = ann.annotate_with_polypstrik(
+            tiny_slide, verify=False, progress=False
+        )
 
     assert result["uploaded"] is True
     assert result["project_id"] == 42
@@ -131,8 +133,12 @@ def test_annotate_second_call_skips_upload(polypstrik_home, tiny_slide):
     }
 
     with patch.object(ann, "PolypStrikClient", return_value=client):
-        first = ann.annotate_with_polypstrik(tiny_slide, verify=False)
-        second = ann.annotate_with_polypstrik(tiny_slide, verify=False)
+        first = ann.annotate_with_polypstrik(
+            tiny_slide, verify=False, progress=False
+        )
+        second = ann.annotate_with_polypstrik(
+            tiny_slide, verify=False, progress=False
+        )
 
     assert first["uploaded"] is True
     assert second["uploaded"] is False
@@ -181,7 +187,7 @@ def test_annotate_completed_writes_files(polypstrik_home, tiny_slide, tmp_path):
 
     with patch.object(ann, "PolypStrikClient", return_value=client):
         result = ann.annotate_with_polypstrik(
-            tiny_slide, verify=False, results_dir=results
+            tiny_slide, verify=False, results_dir=results, progress=False
         )
 
     assert result["status"] == "completed"
@@ -212,7 +218,9 @@ def test_client_create_project_multipart_shape(tiny_slide, monkeypatch):
         return FakeResponse()
 
     monkeypatch.setattr(requests, "post", fake_post)
-    client = PolypStrikClient(base_url="https://example.test", verify=False)
+    client = PolypStrikClient(
+        base_url="https://example.test", verify=False, progress=False
+    )
     body = client.create_project(tiny_slide, "tok-xyz", timeout=30)
 
     assert body["id"] == 1
@@ -255,7 +263,7 @@ def test_vsi_prepare_upload_zips_package(tmp_path):
 
 
 def test_vsi_olympus_underscore_companion(tmp_path):
-    """ Real Olympus layout: ``S19-28250 B1.vsi`` + ``_S19-28250 B1_/``."""
+    """ Olympus layout: ``S19-28250 B1.vsi`` plus ``_S19-28250 B1_/``."""
     from pyslide.polypstrik.vsi import prepare_upload_path, require_vsi_companion
 
     vsi = tmp_path / "S19-28250 B1.vsi"
@@ -275,3 +283,118 @@ def test_vsi_olympus_underscore_companion(tmp_path):
     finally:
         for path in cleanup:
             path.unlink(missing_ok=True)
+
+
+def test_progress_file_counts_bytes(tmp_path):
+    from pyslide.polypstrik.progress import NullBar, ProgressFile
+
+    path = tmp_path / "blob.bin"
+    payload = b"abcdefghijklmnopqrstuvwxyz"
+    path.write_bytes(payload)
+
+    class CountingBar(NullBar):
+        def __init__(self):
+            self.n = 0
+
+        def update(self, n=1):
+            self.n += n
+
+    bar = CountingBar()
+    with open(path, "rb") as raw:
+        wrapped = ProgressFile(raw, bar)
+        chunks = []
+        while True:
+            piece = wrapped.read(8)
+            if not piece:
+                break
+            chunks.append(piece)
+
+    assert b"".join(chunks) == payload
+    assert bar.n == len(payload)
+
+
+def test_resolve_progress_explicit():
+    from pyslide.polypstrik.progress import resolve_progress
+
+    assert resolve_progress(False) is False
+    assert resolve_progress(True) is True
+
+
+def test_extract_progress_pct():
+    from pyslide.polypstrik.progress import extract_progress_pct
+
+    assert extract_progress_pct({"progress": 42}) == 42.0
+    assert extract_progress_pct({"percent": 0.5}) == 50.0
+    assert extract_progress_pct({"status": "processing"}) is None
+
+
+def test_with_retries_recovers_from_connection_error(monkeypatch):
+    requests = pytest.importorskip("requests")
+    from pyslide.polypstrik import client as client_mod
+
+    sleeps = []
+    monkeypatch.setattr(client_mod.time, "sleep", lambda s: sleeps.append(s))
+
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise requests.exceptions.ConnectionError("boom")
+        return "ok"
+
+    result = client_mod._with_retries(
+        flaky, stage="status", retries=3, progress=False
+    )
+    assert result == "ok"
+    assert calls["n"] == 2
+    assert sleeps == [1]
+
+
+def test_with_retries_gives_up(monkeypatch):
+    requests = pytest.importorskip("requests")
+    from pyslide.polypstrik import client as client_mod
+    from pyslide.polypstrik.client import PolypStrikAPIError
+
+    monkeypatch.setattr(client_mod.time, "sleep", lambda s: None)
+
+    def always_fail():
+        raise requests.exceptions.Timeout("slow")
+
+    with pytest.raises(PolypStrikAPIError, match="status failed after 3"):
+        client_mod._with_retries(
+            always_fail, stage="status", retries=3, progress=False
+        )
+
+
+def test_annotate_wait_reaches_completed(polypstrik_home, tiny_slide, monkeypatch):
+    from pyslide.polypstrik import annotate as ann
+
+    monkeypatch.setattr(ann.time, "sleep", lambda s: None)
+
+    client = MagicMock()
+    client.verify = False
+    client.login.return_value = {
+        "token": "tok",
+        "username": "admin",
+        "user_id": 1,
+    }
+    client.create_project.return_value = {"id": 11}
+    client.get_status.side_effect = [
+        {"project_id": 11, "status": "pending"},
+        {"project_id": 11, "status": "processing"},
+        {"project_id": 11, "status": "completed"},
+    ]
+    client.get_project.return_value = {"samples": []}
+
+    with patch.object(ann, "PolypStrikClient", return_value=client):
+        result = ann.annotate_with_polypstrik(
+            tiny_slide,
+            verify=False,
+            wait=True,
+            poll_interval=0.1,
+            progress=False,
+        )
+
+    assert result["status"] == "completed"
+    assert client.get_status.call_count == 3

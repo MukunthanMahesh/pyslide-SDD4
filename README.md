@@ -36,13 +36,16 @@ Requires `pip install -e ".[polypstrik]"`:
 ```bash
 python -m pyslide.polypstrik configure --base-url https://localhost --no-verify --timeout 7200
 python -m pyslide.polypstrik annotate path/to/slide.tif
+python -m pyslide.polypstrik annotate --wait path/to/slide.tif
 python -m pyslide.polypstrik status path/to/slide.tif
 ```
+
+On a TTY, annotate shows upload/download progress and (with `--wait`) a processing progress bar. Transient network errors are retried automatically. TLS warnings are suppressed when verify is disabled. Use `--quiet` or `--json` to hide progress.
 
 ```python
 from pyslide.polypstrik import annotate_with_polypstrik
 
-result = annotate_with_polypstrik("path/to/slide.tif")
+result = annotate_with_polypstrik("path/to/slide.tif", wait=True)
 print(result["status"], result["paths"])
 ```
 

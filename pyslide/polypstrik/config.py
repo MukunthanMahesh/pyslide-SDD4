@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" Persistent PolypStrik client settings (base URL, TLS verify)."""
+""" Persistent PolypStrik client settings: base URL and TLS verify."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def resolve_base_url(base_url=None):
 def resolve_verify(verify=None):
     """ Resolve TLS verify: explicit arg, then env, then config, else True.
 
-    Pass ``verify=None`` to use saved / env defaults. Pass ``False`` or a
+    Pass ``verify=None`` to use saved or env defaults. Pass ``False`` or a
     CA path to force a value.
     """
     if verify is not None:

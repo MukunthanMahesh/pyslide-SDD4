@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" Olympus ``.vsi`` companion-folder checks and upload packaging."""
+""" Olympus ``.vsi`` companion folder checks and upload packaging."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def companion_candidates(vsi_path):
     vsi = Path(vsi_path).resolve()
     stem = vsi.stem
     parent = vsi.parent
-    # Prefer _{stem}_ first — matches typical Olympus folder naming.
+    # Prefer _{stem}_ first; that matches typical Olympus folder naming.
     names = [f"_{stem}_", f"{stem}_"]
     # De-dupe if stem already starts/ends with underscore.
     seen = set()
@@ -63,7 +63,7 @@ def _dir_has_files(path):
 
 
 def require_vsi_companion(vsi_path):
-    """ Return the companion directory, or raise if it is missing / empty.
+    """ Return the companion directory, or raise if it is missing or empty.
 
     Parameters
     ----------
@@ -101,7 +101,7 @@ def require_vsi_companion(vsi_path):
             f"Olympus .vsi companion folder is empty.\n"
             f"  slide:      {vsi}\n"
             f"{empty}\n"
-            f"OpenSlide / PathBT need the pyramid data inside the folder."
+            f"OpenSlide and PathBT need the pyramid data inside the folder."
         )
     raise PolypStrikVsiError(
         f"Olympus .vsi requires a companion folder next to the slide.\n"
@@ -146,7 +146,7 @@ def zip_vsi_package(vsi_path, dest_zip=None):
         dest = Path(dest_zip)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
-    # Store (no deflate): companion tiles / pyramids are large and often
+    # Store (no deflate): companion tiles and pyramids are large and often
     # already compressed; re-zipping would waste CPU on multi-GB slides.
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_STORED) as zf:
         zf.write(vsi, arcname=vsi.name)
@@ -168,7 +168,7 @@ def prepare_upload_path(image_path):
     Parameters
     ----------
     image_path : str or path-like
-        Local slide / archive path.
+        Local slide or archive path.
 
     Returns
     -------

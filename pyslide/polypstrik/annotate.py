@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" High-level PolypStrik annotate flow (auth, upload once, poll, download)."""
+""" High-level PolypStrik annotate flow: auth, upload once, poll, download."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from .auth import clear_token, ensure_credentials
 from .client import PolypStrikAPIError, PolypStrikAuthError, PolypStrikClient
 from .config import load_config, resolve_base_url, resolve_verify
 from .jobs import clear_project_id, get_project_id, image_key, set_project_id
+from .progress import PollReporter, resolve_progress
 from .vsi import prepare_upload_path
 
 
@@ -60,7 +61,7 @@ def _output_fields(sample):
 
 
 def _download_outputs(client, project, token, dest_dir, *, timeout=None):
-    """ Download available PathBT outputs; return list of local paths written."""
+    """ Download available PathBT outputs and return the local paths written."""
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -75,20 +76,30 @@ def _download_outputs(client, project, token, dest_dir, *, timeout=None):
                     sample_id, field, token, dest, timeout=timeout
                 )
             except PolypStrikAPIError:
-                # Skip missing / forbidden fields; keep going for the rest.
+                # Skip missing or forbidden fields; keep going for the rest.
                 continue
             paths.append(str(Path(written).resolve()))
     return paths
 
 
 def _call_with_reauth(client, token, fn):
-    """ Call ``fn(token)``; on 401, force re-login once and retry."""
+    """ Call ``fn(token)``. On 401, force re-login once and retry."""
     try:
         return fn(token), token
     except PolypStrikAuthError:
         clear_token()
         token = ensure_credentials(client, force_login=True, verify=client.verify)
         return fn(token), token
+
+
+def _sleep_with_countdown(reporter, status, interval, *, payload=None):
+    """ Sleep ``interval`` seconds while updating the poll status line."""
+    remaining = float(interval)
+    while remaining > 0:
+        reporter.update(status, next_in=max(remaining, 0), payload=payload)
+        step = min(1.0, remaining)
+        time.sleep(step)
+        remaining -= step
 
 
 def annotate_with_polypstrik(
@@ -101,33 +112,38 @@ def annotate_with_polypstrik(
     results_dir=None,
     verify=None,
     upload=True,
+    progress=None,
 ):
     """ Upload a slide once (if needed), poll status, and download results.
 
     Parameters
     ----------
     image_path : str or path-like
-        Local slide / archive to annotate. Olympus ``.vsi`` files are
+        Local slide or archive to annotate. Olympus ``.vsi`` files are
         auto-zipped with their companion ``{stem}_/`` folder before upload.
     base_url : str, optional
-        PolypStrik base URL (else env / ``~/.polypstrik/config.json``).
+        PolypStrik base URL (else env or ``~/.polypstrik/config.json``).
     wait : bool
         If True, poll until ``completed`` or ``failed``. Default False:
         check once and return.
     poll_interval : float
         Seconds between status polls when ``wait`` is True.
     timeout : float or tuple, optional
-        Passed to the HTTP client for upload / download / requests.
+        Passed to the HTTP client for upload, download, and other requests.
         Falls back to ``timeout`` in ``~/.polypstrik/config.json`` when set.
     results_dir : str or path-like, optional
         Parent directory for downloads. Defaults to
         ``./polypstrik_results/<project_id>/``.
     verify : bool or str, optional
-        TLS verify flag / CA path. When omitted, uses env
+        TLS verify flag or CA path. When omitted, uses env
         ``POLYPSTRIK_VERIFY`` or saved config (``configure --no-verify``).
     upload : bool
-        If False, never create a project — only look up an existing job
+        If False, never create a project; only look up an existing job
         (used by the ``status`` CLI). Default True.
+    progress : bool or None, optional
+        Show upload, poll, and download progress. ``None`` (default) turns
+        progress on when stderr is a TTY; ``False`` silences it (tests,
+        ``--json``, ``--quiet``); ``True`` forces it on.
 
     Returns
     -------
@@ -147,6 +163,7 @@ def annotate_with_polypstrik(
     if not path.is_file():
         raise FileNotFoundError(f"No such file: {path.resolve()}")
 
+    show_progress = resolve_progress(progress)
     verify = resolve_verify(verify)
     if timeout is None:
         cfg_timeout = load_config().get("timeout")
@@ -155,6 +172,7 @@ def annotate_with_polypstrik(
     client_kwargs = {
         "base_url": resolve_base_url(base_url),
         "verify": verify,
+        "progress": show_progress,
     }
     if timeout is not None:
         client_kwargs["timeout"] = timeout
@@ -196,7 +214,7 @@ def annotate_with_polypstrik(
         try:
             status_payload, token = _call_with_reauth(client, token, _status)
         except PolypStrikAPIError as exc:
-            # Stale local mapping (Docker reset / project deleted).
+            # Stale local mapping (Docker reset or project deleted).
             if getattr(exc, "status_code", None) == 404:
                 clear_project_id(key)
                 if not upload:
@@ -240,16 +258,36 @@ def annotate_with_polypstrik(
 
         if wait and status not in _TERMINAL:
             interval = max(float(poll_interval), 0.1)
-            while True:
-                time.sleep(interval)
-                status_payload, token = _call_with_reauth(client, token, _status)
-                status = (
-                    status_payload.get("status")
-                    if isinstance(status_payload, dict)
-                    else None
+            reporter = PollReporter(enabled=show_progress)
+            try:
+                reporter.update(
+                    status, next_in=interval, payload=status_payload
                 )
-                if status in _TERMINAL:
-                    break
+                while True:
+                    _sleep_with_countdown(
+                        reporter,
+                        status,
+                        interval,
+                        payload=status_payload,
+                    )
+                    status_payload, token = _call_with_reauth(
+                        client, token, _status
+                    )
+                    status = (
+                        status_payload.get("status")
+                        if isinstance(status_payload, dict)
+                        else None
+                    )
+                    reporter.update(
+                        status,
+                        next_in=interval,
+                        payload=status_payload,
+                        tick=True,
+                    )
+                    if status in _TERMINAL:
+                        break
+            finally:
+                reporter.close(final_status=status)
 
         paths = []
         out_dir = None

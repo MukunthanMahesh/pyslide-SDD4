@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" Local registry mapping slide identity to PolypStrik project_id."""
+""" Local registry that maps slide identity to PolypStrik project_id."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _path():
 def image_key(path):
     """ Stable-enough identity for a local slide file.
 
-    Uses absolute path + size + mtime (nanoseconds when available).
+    Uses absolute path, size, and mtime (nanoseconds when available).
     """
     p = Path(path).resolve()
     if not p.is_file():

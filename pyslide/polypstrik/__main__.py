@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" CLI entry for ``python -m pyslide.polypstrik annotate|status|configure``."""
+""" CLI entry for ``python -m pyslide.polypstrik`` (annotate, status, configure)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import sys
 
 
 def _build_parser():
-    """ Build the annotate / status / configure argument parser."""
+    """ Build the annotate, status, and configure argument parser."""
     parser = argparse.ArgumentParser(
         prog="python -m pyslide.polypstrik",
         description="PolypStrik remote-annotation client",
@@ -17,7 +17,7 @@ def _build_parser():
     parser.add_argument(
         "--base-url",
         default=None,
-        help="PolypStrik base URL (else env / saved config)",
+        help="PolypStrik base URL (else env or saved config)",
     )
     parser.add_argument(
         "--no-verify",
@@ -28,19 +28,24 @@ def _build_parser():
         "--timeout",
         type=float,
         default=None,
-        help="HTTP / upload timeout in seconds",
+        help="HTTP and upload timeout in seconds",
     )
     parser.add_argument(
         "--json",
         action="store_true",
         help="Print the result dict as JSON",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Hide upload, poll, and download progress output",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
     annotate_parser = subparsers.add_parser(
         "annotate",
-        help="Upload (once) and/or check annotation status "
+        help="Upload once and/or check annotation status "
         "(.vsi auto-zips with companion folder)",
     )
     annotate_parser.add_argument("slide", help="Path to slide image")
@@ -69,7 +74,7 @@ def _build_parser():
 
     configure_parser = subparsers.add_parser(
         "configure",
-        help="Save base URL / TLS defaults to ~/.polypstrik/config.json",
+        help="Save base URL and TLS defaults to ~/.polypstrik/config.json",
     )
     configure_parser.add_argument(
         "--base-url",
@@ -85,7 +90,7 @@ def _build_parser():
         "--timeout",
         type=float,
         default=None,
-        help="Default HTTP / upload timeout in seconds",
+        help="Default HTTP and upload timeout in seconds",
     )
     configure_parser.add_argument(
         "--show",
@@ -97,7 +102,7 @@ def _build_parser():
 
 
 def _print_result(result, *, as_json=False):
-    """ Print annotate result as JSON or a short human summary."""
+    """ Print the annotate result as JSON or a short human summary."""
     if as_json:
         print(json.dumps(result, indent=2, default=str))
         return
@@ -141,12 +146,15 @@ def main(argv=None):
 
     from .annotate import annotate_with_polypstrik
 
-    # None means "use env / ~/.polypstrik/config.json".
+    # None means "use env or ~/.polypstrik/config.json".
     verify = False if args.no_verify else None
+    # --json / --quiet must stay machine-readable or silent.
+    show_progress = False if (args.json or args.quiet) else None
     common = {
         "base_url": args.base_url,
         "verify": verify,
         "timeout": args.timeout,
+        "progress": show_progress,
     }
 
     if args.command == "annotate":

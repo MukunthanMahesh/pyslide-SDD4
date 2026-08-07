@@ -64,7 +64,7 @@ def save_token(token, *, username=None, user_id=None):
     if user_id is not None:
         data["user_id"] = user_id
 
-    # Restrict perms when creating the file (best-effort on Windows).
+    # Restrict permissions when creating the file (best-effort on Windows).
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -76,7 +76,7 @@ def save_token(token, *, username=None, user_id=None):
     try:
         os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
-        # Windows / non-POSIX filesystems may ignore or reject mode bits.
+        # Windows and non-POSIX filesystems may ignore or reject mode bits.
         pass
 
     return path
@@ -99,7 +99,7 @@ def _prompt(prompt, *, secret=False):
 
 
 def _read_login_inputs(*, username=None, password=None, otp=None):
-    """ Resolve username/password/otp from args, env, or interactive prompts."""
+    """ Resolve username, password, and otp from args, env, or interactive prompts."""
     user = username or os.environ.get("POLYPSTRIK_USER") or os.environ.get(
         "POLYPSTRIK_USERNAME"
     )
@@ -125,20 +125,21 @@ def ensure_credentials(
     password=None,
     otp=None,
 ):
-    """ Return a usable API token, prompting / logging in when needed.
+    """ Return a usable API token, prompting or logging in when needed.
 
     Parameters
     ----------
     client : PolypStrikClient, optional
-        Existing client used for ``login``. Created from ``base_url`` /
+        Existing client used for ``login``. Created from ``base_url`` or
         ``POLYPSTRIK_BASE_URL`` when omitted.
     force_login : bool
-        If True, ignore any saved token and re-authenticate (e.g. after 401).
+        If True, ignore any saved token and re-authenticate (for example
+        after a 401).
     base_url, verify
         Passed to ``PolypStrikClient`` when ``client`` is not provided.
     username, password, otp : str, optional
-        Non-interactive overrides; otherwise env ``POLYPSTRIK_USER`` /
-        ``POLYPSTRIK_PASSWORD`` / ``POLYPSTRIK_OTP``, then prompts.
+        Non-interactive overrides; otherwise env ``POLYPSTRIK_USER``,
+        ``POLYPSTRIK_PASSWORD``, ``POLYPSTRIK_OTP``, then prompts.
 
     Returns
     -------
@@ -163,7 +164,7 @@ def ensure_credentials(
         auth = client.login(user, pwd, otp=code)
     except PolypStrikOtpRequired:
         if code:
-            # Caller already supplied a bad/stale OTP; re-raise.
+            # Caller already supplied a bad or stale OTP; re-raise.
             raise
         code = os.environ.get("POLYPSTRIK_OTP") or _prompt(
             "OTP code: "

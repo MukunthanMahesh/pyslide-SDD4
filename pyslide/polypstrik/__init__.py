@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" Optional PolypStrik remote-annotation client."""
+""" Optional client for PolypStrik remote annotation."""
 
 from .annotate import annotate_with_polypstrik
 from .client import (
