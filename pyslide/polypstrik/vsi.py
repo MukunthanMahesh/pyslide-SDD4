@@ -11,6 +11,7 @@ from pathlib import Path
 
 __all__ = [
     "PolypStrikVsiError",
+    "companion_candidates",
     "companion_dir",
     "prepare_upload_path",
     "require_vsi_companion",
@@ -22,13 +23,43 @@ class PolypStrikVsiError(ValueError):
     """ Olympus ``.vsi`` package is incomplete or invalid for upload."""
 
 
-def companion_dir(vsi_path):
-    """ Return the expected Olympus companion directory for a ``.vsi`` file.
+def companion_candidates(vsi_path):
+    """ Return possible Olympus companion directories for a ``.vsi`` file.
 
-    For ``slide.vsi`` this is ``slide_/`` next to the file.
+    Supports both common layouts next to ``S19-28250 B1.vsi``:
+
+    * ``S19-28250 B1_/``  (OpenSlide-style ``{stem}_``)
+    * ``_S19-28250 B1_/`` (Olympus export-style ``_{stem}_``)
     """
     vsi = Path(vsi_path).resolve()
-    return vsi.parent / f"{vsi.stem}_"
+    stem = vsi.stem
+    parent = vsi.parent
+    # Prefer _{stem}_ first — matches typical Olympus folder naming.
+    names = [f"_{stem}_", f"{stem}_"]
+    # De-dupe if stem already starts/ends with underscore.
+    seen = set()
+    out = []
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(parent / name)
+    return out
+
+
+def companion_dir(vsi_path):
+    """ Return the preferred companion directory path (may not exist yet).
+
+    Prefers the Olympus ``_{stem}_`` layout when listing candidates.
+    """
+    return companion_candidates(vsi_path)[0]
+
+
+def _dir_has_files(path):
+    for _root, _dirs, files in os.walk(path):
+        if files:
+            return True
+    return False
 
 
 def require_vsi_companion(vsi_path):
@@ -42,50 +73,52 @@ def require_vsi_companion(vsi_path):
     Returns
     -------
     pathlib.Path
-        Absolute path to the companion ``{stem}_/`` directory.
+        Absolute path to the companion directory that was found.
 
     Raises
     ------
     PolypStrikVsiError
-        Companion folder is missing or contains no files.
+        No usable companion folder next to the slide.
     """
     vsi = Path(vsi_path).resolve()
     if vsi.suffix.lower() != ".vsi":
         raise PolypStrikVsiError(f"Not a .vsi file: {vsi}")
 
-    companion = companion_dir(vsi)
-    if not companion.is_dir():
-        raise PolypStrikVsiError(
-            f"Olympus .vsi requires companion folder '{companion.name}/' "
-            f"next to the slide.\n"
-            f"  slide:      {vsi}\n"
-            f"  expected:   {companion}\n"
-            f"Zip the .vsi with that folder, or place '{companion.name}/' "
-            f"beside the file and retry."
-        )
+    candidates = companion_candidates(vsi)
+    found_empty = []
+    for companion in candidates:
+        if not companion.is_dir():
+            continue
+        if not _dir_has_files(companion):
+            found_empty.append(companion)
+            continue
+        return companion
 
-    # Ensure the folder is not an empty placeholder.
-    has_file = False
-    for _root, _dirs, files in os.walk(companion):
-        if files:
-            has_file = True
-            break
-    if not has_file:
+    expected = "\n".join(f"  expected:   {c}" for c in candidates)
+    if found_empty:
+        empty = "\n".join(f"  empty:      {c}" for c in found_empty)
         raise PolypStrikVsiError(
-            f"Companion folder is empty: {companion}\n"
-            f"OpenSlide / PathBT need the pyramid data inside "
-            f"'{companion.name}/'."
+            f"Olympus .vsi companion folder is empty.\n"
+            f"  slide:      {vsi}\n"
+            f"{empty}\n"
+            f"OpenSlide / PathBT need the pyramid data inside the folder."
         )
-    return companion
+    raise PolypStrikVsiError(
+        f"Olympus .vsi requires a companion folder next to the slide.\n"
+        f"  slide:      {vsi}\n"
+        f"{expected}\n"
+        f"Zip the .vsi with that folder, or place the companion beside "
+        f"the file and retry."
+    )
 
 
 def zip_vsi_package(vsi_path, dest_zip=None):
-    """ Zip a ``.vsi`` file with its companion ``{stem}_/`` folder.
+    """ Zip a ``.vsi`` file with its companion folder.
 
-    Archive layout (zip root)::
+    Archive layout keeps the real companion folder name at the zip root::
 
-        slide.vsi
-        slide_/...
+        S19-28250 B1.vsi
+        _S19-28250 B1_/...
 
     Uses ``ZIP_STORED`` so large WSI payloads are not re-compressed.
 
@@ -106,7 +139,7 @@ def zip_vsi_package(vsi_path, dest_zip=None):
     parent = vsi.parent
 
     if dest_zip is None:
-        fd, name = tempfile.mkstemp(prefix=f"{vsi.stem}_", suffix=".zip")
+        fd, name = tempfile.mkstemp(prefix="vsi_", suffix=".zip")
         os.close(fd)
         dest = Path(name)
     else:

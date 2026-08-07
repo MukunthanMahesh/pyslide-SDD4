@@ -29,16 +29,20 @@ class PolypStrikOtpRequired(PolypStrikAuthError):
 
 
 class PolypStrikClient:
-    def __init__(self, base_url=None, timeout=30, verify=True):
-        url = base_url or os.environ.get("POLYPSTRIK_BASE_URL")
+    def __init__(self, base_url=None, timeout=30, verify=None):
+        from .config import resolve_base_url, resolve_verify
+
+        url = resolve_base_url(base_url)
         if not url:
             raise ValueError(
-                "base_url is required (or set POLYPSTRIK_BASE_URL)"
+                "base_url is required (pass it, set POLYPSTRIK_BASE_URL, "
+                "or run: python -m pyslide.polypstrik configure "
+                "--base-url https://...)"
             )
         self.base_url = url.rstrip("/")
         self.timeout = timeout
         # False (or a CA bundle path) for local Docker self-signed TLS.
-        self.verify = verify
+        self.verify = resolve_verify(verify)
 
     def _url(self, path):
         if not path.startswith("/"):

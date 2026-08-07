@@ -252,3 +252,26 @@ def test_vsi_prepare_upload_zips_package(tmp_path):
     finally:
         for path in cleanup:
             path.unlink(missing_ok=True)
+
+
+def test_vsi_olympus_underscore_companion(tmp_path):
+    """ Real Olympus layout: ``S19-28250 B1.vsi`` + ``_S19-28250 B1_/``."""
+    from pyslide.polypstrik.vsi import prepare_upload_path, require_vsi_companion
+
+    vsi = tmp_path / "S19-28250 B1.vsi"
+    vsi.write_bytes(b"vsi")
+    companion = tmp_path / "_S19-28250 B1_"
+    companion.mkdir()
+    (companion / "pyramid.bin").write_bytes(b"tiles")
+
+    assert require_vsi_companion(vsi) == companion.resolve()
+
+    upload, cleanup = prepare_upload_path(vsi)
+    try:
+        with zipfile.ZipFile(upload) as zf:
+            names = set(zf.namelist())
+        assert "S19-28250 B1.vsi" in names
+        assert "_S19-28250 B1_/pyramid.bin" in names
+    finally:
+        for path in cleanup:
+            path.unlink(missing_ok=True)

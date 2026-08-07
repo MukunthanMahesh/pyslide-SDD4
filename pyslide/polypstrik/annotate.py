@@ -9,23 +9,14 @@ from pathlib import Path
 
 from .auth import clear_token, ensure_credentials
 from .client import PolypStrikAPIError, PolypStrikAuthError, PolypStrikClient
-from .jobs import get_project_id, image_key, set_project_id
+from .config import load_config, resolve_base_url, resolve_verify
+from .jobs import clear_project_id, get_project_id, image_key, set_project_id
 from .vsi import prepare_upload_path
 
 
 __all__ = ["annotate_with_polypstrik"]
 
 _TERMINAL = frozenset({"completed", "failed"})
-
-
-def _resolve_verify(verify):
-    """ Honor explicit ``verify``; otherwise ``POLYPSTRIK_VERIFY`` (0/false means False)."""
-    if verify is not True:
-        return verify
-    env = os.environ.get("POLYPSTRIK_VERIFY")
-    if env is None:
-        return True
-    return env.strip().lower() not in ("0", "false", "no", "off")
 
 
 def _default_results_dir(project_id, results_dir=None):
@@ -108,7 +99,7 @@ def annotate_with_polypstrik(
     poll_interval=5.0,
     timeout=None,
     results_dir=None,
-    verify=True,
+    verify=None,
     upload=True,
 ):
     """ Upload a slide once (if needed), poll status, and download results.
@@ -119,7 +110,7 @@ def annotate_with_polypstrik(
         Local slide / archive to annotate. Olympus ``.vsi`` files are
         auto-zipped with their companion ``{stem}_/`` folder before upload.
     base_url : str, optional
-        PolypStrik base URL (else ``POLYPSTRIK_BASE_URL``).
+        PolypStrik base URL (else env / ``~/.polypstrik/config.json``).
     wait : bool
         If True, poll until ``completed`` or ``failed``. Default False:
         check once and return.
@@ -127,12 +118,13 @@ def annotate_with_polypstrik(
         Seconds between status polls when ``wait`` is True.
     timeout : float or tuple, optional
         Passed to the HTTP client for upload / download / requests.
+        Falls back to ``timeout`` in ``~/.polypstrik/config.json`` when set.
     results_dir : str or path-like, optional
         Parent directory for downloads. Defaults to
         ``./polypstrik_results/<project_id>/``.
-    verify : bool or str
-        TLS verify flag / CA path for ``requests`` (also
-        ``POLYPSTRIK_VERIFY=0`` for local self-signed Docker).
+    verify : bool or str, optional
+        TLS verify flag / CA path. When omitted, uses env
+        ``POLYPSTRIK_VERIFY`` or saved config (``configure --no-verify``).
     upload : bool
         If False, never create a project — only look up an existing job
         (used by the ``status`` CLI). Default True.
@@ -155,8 +147,15 @@ def annotate_with_polypstrik(
     if not path.is_file():
         raise FileNotFoundError(f"No such file: {path.resolve()}")
 
-    verify = _resolve_verify(verify)
-    client_kwargs = {"base_url": base_url, "verify": verify}
+    verify = resolve_verify(verify)
+    if timeout is None:
+        cfg_timeout = load_config().get("timeout")
+        if cfg_timeout is not None:
+            timeout = cfg_timeout
+    client_kwargs = {
+        "base_url": resolve_base_url(base_url),
+        "verify": verify,
+    }
     if timeout is not None:
         client_kwargs["timeout"] = timeout
     client = PolypStrikClient(**client_kwargs)
@@ -194,7 +193,45 @@ def annotate_with_polypstrik(
         def _status(tok):
             return client.get_status(project_id, tok)
 
-        status_payload, token = _call_with_reauth(client, token, _status)
+        try:
+            status_payload, token = _call_with_reauth(client, token, _status)
+        except PolypStrikAPIError as exc:
+            # Stale local mapping (Docker reset / project deleted).
+            if getattr(exc, "status_code", None) == 404:
+                clear_project_id(key)
+                if not upload:
+                    return {
+                        "project_id": None,
+                        "status": None,
+                        "uploaded": False,
+                        "paths": [],
+                        "results_dir": None,
+                        "status_payload": None,
+                        "message": (
+                            f"Saved project_id={project_id} was not found on "
+                            f"the server (cleared local job). Run annotate "
+                            f"again to re-upload."
+                        ),
+                    }
+                upload_path, cleanup_paths = prepare_upload_path(path)
+
+                def _create_again(tok):
+                    return client.create_project(
+                        upload_path, tok, timeout=timeout
+                    )
+
+                created, token = _call_with_reauth(
+                    client, token, _create_again
+                )
+                project_id = created["id"]
+                set_project_id(key, project_id)
+                uploaded = True
+                status_payload, token = _call_with_reauth(
+                    client, token, _status
+                )
+            else:
+                raise
+
         status = (
             status_payload.get("status")
             if isinstance(status_payload, dict)

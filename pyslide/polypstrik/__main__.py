@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-""" CLI entry for ``python -m pyslide.polypstrik annotate|status``."""
+""" CLI entry for ``python -m pyslide.polypstrik annotate|status|configure``."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import sys
 
 
 def _build_parser():
-    """ Build the annotate / status argument parser."""
+    """ Build the annotate / status / configure argument parser."""
     parser = argparse.ArgumentParser(
         prog="python -m pyslide.polypstrik",
         description="PolypStrik remote-annotation client",
@@ -17,7 +17,7 @@ def _build_parser():
     parser.add_argument(
         "--base-url",
         default=None,
-        help="PolypStrik base URL (else POLYPSTRIK_BASE_URL)",
+        help="PolypStrik base URL (else env / saved config)",
     )
     parser.add_argument(
         "--no-verify",
@@ -67,6 +67,32 @@ def _build_parser():
     )
     status_parser.add_argument("slide", help="Path to slide image")
 
+    configure_parser = subparsers.add_parser(
+        "configure",
+        help="Save base URL / TLS defaults to ~/.polypstrik/config.json",
+    )
+    configure_parser.add_argument(
+        "--base-url",
+        required=True,
+        help="PolypStrik base URL to remember",
+    )
+    configure_parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Remember TLS verify=False (local Docker)",
+    )
+    configure_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="Default HTTP / upload timeout in seconds",
+    )
+    configure_parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Print the saved config after writing",
+    )
+
     return parser
 
 
@@ -98,11 +124,28 @@ def main(argv=None):
         parser.print_help()
         return 1
 
+    if args.command == "configure":
+        from .config import load_config, save_config
+
+        updates = {
+            "base_url": args.base_url.rstrip("/"),
+            "verify": not args.no_verify,
+        }
+        if args.timeout is not None:
+            updates["timeout"] = args.timeout
+        path = save_config(updates)
+        print(f"Saved config to {path}")
+        if args.show:
+            print(json.dumps(load_config(), indent=2))
+        return 0
+
     from .annotate import annotate_with_polypstrik
 
+    # None means "use env / ~/.polypstrik/config.json".
+    verify = False if args.no_verify else None
     common = {
         "base_url": args.base_url,
-        "verify": not args.no_verify,
+        "verify": verify,
         "timeout": args.timeout,
     }
 

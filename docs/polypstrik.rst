@@ -9,24 +9,44 @@ Install the optional dependency first::
 This subpackage does **not** analyze slides locally. It uploads a slide once,
 polls analysis status on the server, and downloads PathBT outputs when complete.
 
-Environment
------------
+One-time setup
+--------------
+Save server defaults so you do not need ``--base-url`` / ``--no-verify`` every
+time (stored in ``~/.polypstrik/config.json``)::
 
-* ``POLYPSTRIK_BASE_URL`` — server base URL (required unless passed explicitly)
-* ``POLYPSTRIK_USER`` / ``POLYPSTRIK_PASSWORD`` / ``POLYPSTRIK_OTP`` — login
+    python -m pyslide.polypstrik configure --base-url https://localhost --no-verify --timeout 7200
+
+After the first successful login, the API token is saved under
+``~/.polypstrik/credentials.json`` (password is not required on later runs).
+
+Environment / config
+--------------------
+
+Resolution order for connection settings: CLI flag, then environment variable,
+then ``~/.polypstrik/config.json``.
+
+* ``POLYPSTRIK_BASE_URL`` — server base URL
+* ``POLYPSTRIK_USER`` / ``POLYPSTRIK_PASSWORD`` / ``POLYPSTRIK_OTP`` — login (first time)
 * ``POLYPSTRIK_VERIFY=0`` — disable TLS verify for local self-signed Docker
-* Credentials and job registry are stored under ``~/.polypstrik/``
+* ``~/.polypstrik/jobs.json`` — slide path to ``project_id`` registry (avoids re-upload)
 
 CLI
 ---
-::
+After ``configure``, typical usage::
 
-    python -m pyslide.polypstrik --base-url https://localhost --no-verify annotate path/to/slide.tif
-    python -m pyslide.polypstrik --base-url https://localhost --no-verify annotate --wait path/to/slide.tif
-    python -m pyslide.polypstrik --base-url https://localhost --no-verify status path/to/slide.tif
+    python -m pyslide.polypstrik annotate path/to/slide.tif
+    python -m pyslide.polypstrik annotate --wait path/to/slide.tif
+    python -m pyslide.polypstrik status path/to/slide.tif
 
-Olympus ``.vsi`` files are auto-zipped with their companion ``{stem}_/`` folder
-before upload. A clear error is raised if that folder is missing.
+Olympus ``.vsi``
+----------------
+``.vsi`` files are auto-zipped with their companion folder before upload.
+Accepted companion names next to ``S19-28250 B1.vsi``:
+
+* ``_S19-28250 B1_/`` (common Olympus export layout)
+* ``S19-28250 B1_/`` (OpenSlide-style ``{stem}_``)
+
+A clear error is raised if neither folder is present (or it is empty).
 
 Python API
 ----------
@@ -36,8 +56,6 @@ Python API
 
     result = annotate_with_polypstrik(
         "path/to/slide.tif",
-        base_url="https://localhost",
-        verify=False,
         wait=False,
     )
     print(result["project_id"], result["status"], result["paths"])
@@ -54,7 +72,7 @@ annotate_with_polypstrik
         poll_interval=5.0,
         timeout=None,
         results_dir=None,
-        verify=True,
+        verify=None,
         upload=True,
     ):
         """ Upload a slide once (if needed), poll status, and download results.

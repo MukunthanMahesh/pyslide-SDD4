@@ -10,6 +10,7 @@ from pathlib import Path
 
 __all__ = [
     "JOBS_PATH",
+    "clear_project_id",
     "get_project_id",
     "image_key",
     "load_jobs",
@@ -101,3 +102,19 @@ def set_project_id(key, project_id):
     jobs[str(key)] = project_id
     save_jobs(jobs)
     return project_id
+
+
+def clear_project_id(key):
+    """ Remove any stored ``project_id`` for ``key``.
+
+    Returns
+    -------
+    bool
+        True if an entry was removed.
+    """
+    jobs = load_jobs()
+    if str(key) not in jobs:
+        return False
+    del jobs[str(key)]
+    save_jobs(jobs)
+    return True
