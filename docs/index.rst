@@ -15,6 +15,7 @@ The documentation for `pyslide <https://github.com/PingjunChen/pyslide>`_ is mai
   contour
   patch
   pyramid
+  polypstrik
 
 .. _about-docs:
 

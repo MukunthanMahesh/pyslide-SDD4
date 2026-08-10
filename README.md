@@ -29,6 +29,28 @@ Documentation
 ------------
 Hosted in [https://pyslide.readthedocs.io](https://pyslide.readthedocs.io), powered by [readthedocs](https://readthedocs.org) and [Sphinx](http://www.sphinx-doc.org).
 
+Optional PolypStrik remote annotation
+------------
+Requires `pip install -e ".[polypstrik]"`:
+
+```bash
+python -m pyslide.polypstrik configure --base-url https://localhost --no-verify --timeout 7200
+python -m pyslide.polypstrik annotate path/to/slide.tif
+python -m pyslide.polypstrik annotate --wait path/to/slide.tif
+python -m pyslide.polypstrik status path/to/slide.tif
+```
+
+On a TTY, annotate shows upload/download progress and (with `--wait`) a processing progress bar. Transient network errors are retried automatically. TLS warnings are suppressed when verify is disabled. Use `--quiet` or `--json` to hide progress.
+
+```python
+from pyslide.polypstrik import annotate_with_polypstrik
+
+result = annotate_with_polypstrik("path/to/slide.tif", wait=True)
+print(result["status"], result["paths"])
+```
+
+Olympus `.vsi` slides are auto-zipped with their companion folder (`_{stem}_/` or `{stem}_/`) before upload. See the PolypStrik docs page for details.
+
 License
 ------------
 [pyslide](https://github.com/PingjunChen/pyslide) is free software made available under the MIT License. For details see the [LICENSE](LICENSE) file.

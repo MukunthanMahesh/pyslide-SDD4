@@ -36,6 +36,9 @@ args = dict(
     author_email=AUTHOR_EMAIL,
     packages=find_packages(),
     install_requires=REQS,
+    extras_require={
+        "polypstrik": ["requests>=2.28", "tqdm>=4.64"],
+    },
     classifiers= CLASSIFIERS,
 )
 
